@@ -1,4 +1,3 @@
-
 name: Merge Conflict Bot
 
 on:
@@ -72,6 +71,8 @@ jobs:
               .replace(/\.md$/i, "");
 
             const baseBranch = pr.base.ref;
+            const conflictBranch =
+              `bot/task3-conflict-${pr.number}-${context.runId}`;
 
             // Ensure the submission file does not already exist
             // on the default branch.
@@ -92,9 +93,21 @@ jobs:
               if (error.status !== 404) throw error;
             }
 
-            // Create a competing Markdown version on the base branch.
-            // The participant's branch and this commit will add
-            // the same file independently, creating an add/add conflict.
+            // Create a branch from the current base because direct writes
+            // to the protected default branch are not allowed.
+            const baseRef = await github.rest.git.getRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `heads/${baseBranch}`
+            });
+
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/heads/${conflictBranch}`,
+              sha: baseRef.data.object.sha
+            });
+
             const botContent = [
               "# Task 3 - Workshop Bot",
               "",
@@ -112,7 +125,19 @@ jobs:
               path,
               message: `bot(task3): create conflict for ${rollNumber}`,
               content: Buffer.from(botContent).toString("base64"),
-              branch: baseBranch
+              branch: conflictBranch
+            });
+
+            const conflictPr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: conflictBranch,
+              base: baseBranch,
+              title: `bot(task3): create conflict for ${rollNumber}`,
+              body:
+                `This PR adds the bot's competing version of ${path}.\n\n` +
+                "Merge this PR to add the competing base version and create the " +
+                "intended add/add conflict with the participant PR."
             });
 
             // Notify the participant without closing the PR or issue.
@@ -121,14 +146,13 @@ jobs:
               repo: context.repo.repo,
               issue_number: pr.number,
               body:
-                "🤖 **Task 3 conflict created!**\n\n" +
-                `I added a competing version of \`${path}\` to ` +
-                `\`${baseBranch}\`.\n\n` +
-                "**Your required addition:**\n\n" +
-                "> The final report must explain how both contributions were integrated.\n\n" +
-                "Fetch the latest base branch, merge it into your branch, " +
-                "resolve the conflict, commit the resolution, and push " +
-                "to this same PR.\n\n" +
+                "🤖 **Task 3 conflict prepared!**\n\n" +
+                `I created the bot's competing version of ${path} in ` +
+                `${conflictPr.data.html_url}.\n\n` +
+                "Merge that pull request to add the competing version to the " +
+                "default branch. Then fetch the latest base branch, merge it into " +
+                "your branch, resolve the conflict, commit the resolution, and " +
+                "push to this same PR.\n\n" +
                 "Remember:\n" +
                 "- Preserve your original content.\n" +
                 "- Incorporate my requested sentence.\n" +
@@ -137,4 +161,4 @@ jobs:
                 "Good luck! 🔍"
             });
 
-            core.info(`Created conflict for ${path}`);
+            core.info(`Created conflict PR ${conflictPr.data.html_url} for ${path}.`);
