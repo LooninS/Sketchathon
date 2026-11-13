@@ -8,9 +8,11 @@ on:
       - "task/**"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
   issues: write
+
+
 
 jobs:
   create-conflict:
@@ -18,21 +20,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Generate a token belonging to your GitHub App.
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.task3_bot_app_id }}
+          private-key: ${{ secrets.KEY }}
+
       - name: Validate PR and create conflicting base commit
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
+            const { owner, repo } = context.repo;
             const pr = context.payload.pull_request;
 
             // Only operate on PRs targeting the default branch.
             if (pr.base.ref !== context.payload.repository.default_branch) {
-              core.setFailed("Task 3 PRs must target the default branch.");
+              core.setFailed(
+                "Task 3 PRs must target the default branch."
+              );
               return;
             }
 
             // Require a reference to Issue #1.
-            // Do not use closing keywords: the issue must remain open.
+            // Do not use closing keywords.
             const body = pr.body || "";
             const issuePattern = /\bIssue\s+#1\b/i;
 
@@ -47,8 +60,8 @@ jobs:
             const files = await github.paginate(
               github.rest.pulls.listFiles,
               {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
+                owner,
+                repo,
                 pull_number: pr.number,
                 per_page: 100
               }
@@ -61,12 +74,13 @@ jobs:
 
             if (submissions.length !== 1) {
               core.setFailed(
-                "Submit exactly one new task/IIT2025099.md file."
+                "Submit exactly one new task/XXX2026YYY.md file."
               );
               return;
             }
 
             const path = submissions[0].filename;
+
             const rollNumber = path
               .split("/")
               .pop()
@@ -74,12 +88,11 @@ jobs:
 
             const baseBranch = pr.base.ref;
 
-            // Ensure the submission file does not already exist
-            // on the default branch.
+            // Ensure the file does not already exist on base.
             try {
               await github.rest.repos.getContent({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
+                owner,
+                repo,
                 path,
                 ref: baseBranch
               });
@@ -89,13 +102,14 @@ jobs:
                 "Use a unique roll-number filename."
               );
               return;
+
             } catch (error) {
-              if (error.status !== 404) throw error;
+              if (error.status !== 404) {
+                throw error;
+              }
             }
 
-            // Create a competing Markdown version on the base branch.
-            // The participant's branch and this commit will add
-            // the same file independently, creating an add/add conflict.
+            // Competing version created by the bot.
             const botContent = [
               "# Task 3 - Workshop Bot",
               "",
@@ -107,19 +121,21 @@ jobs:
               ""
             ].join("\n");
 
+            // Commit directly to the protected base branch.
+            // The GitHub App is authorized to bypass the ruleset.
             await github.rest.repos.createOrUpdateFileContents({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner,
+              repo,
               path,
               message: `bot(task3): create conflict for ${rollNumber}`,
               content: Buffer.from(botContent).toString("base64"),
               branch: baseBranch
             });
 
-            // Notify the participant without closing the PR or issue.
+            // Notify the participant.
             await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner,
+              repo,
               issue_number: pr.number,
               body:
                 "🤖 **Task 3 conflict created!**\n\n" +
